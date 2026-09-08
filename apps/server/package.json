@@ -1,16 +1,17 @@
 {
   "name": "@riftbound/server",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx src/index.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
-    "test": "tsx --test src/game-engine.test.ts",
+    "test": "tsx --test src/**/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@riftbound/game-core": "*",
     "@riftbound/shared": "*",
     "cors": "^2.8.5",
     "express": "^5.1.0",

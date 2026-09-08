@@ -3,4 +3,11 @@ dist/
 *.log
 *.tsbuildinfo
 .env
+.env.*
+!.env.example
 .DS_Store
+apps/client-cocos/library/
+apps/client-cocos/temp/
+apps/client-cocos/local/
+apps/client-cocos/build/
+apps/client-cocos/native/

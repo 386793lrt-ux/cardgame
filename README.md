@@ -1,6 +1,15 @@
-# 裂隙牌局（Riftbound Duel）
+# 裂隙牌局（Riftbound Duel）0.2
 
-原创的双人在线 1v1 回合制卡牌游戏 MVP。服务端是唯一权威状态源，客户端只提交操作意图。
+原创的双人在线 1v1 回合制卡牌游戏。0.2 将确定性规则、公共协议、服务端和客户端分层，为 Cocos Creator、微信小游戏及未来 PC 平台做准备。服务端是唯一权威状态源，客户端只提交 `PlayerAction`。
+
+## 目录
+
+- `apps/server`：Express + Socket.IO 权威服务器
+- `apps/client-cocos`：Cocos Creator 接入准备层（尚非 Creator 工程）
+- `packages/game-core`：纯 TypeScript 游戏规则、完整秘密状态和测试
+- `packages/shared`：公共协议、玩家视图、网络 SDK、错误与平台接口
+- `client`：保留的 React/Vite 可玩验证客户端
+- `docs`：架构与版本路线
 
 ## 本地运行
 
@@ -24,4 +33,4 @@ npm run build
 
 ## Render 公网部署
 
-项目根目录已经包含 `render.yaml`。将仓库推送到 GitHub 后，在 Render Dashboard 选择 **New → Blueprint**，连接仓库并确认创建即可。生产环境由同一个 Web Service 同时提供网页和 Socket.IO，因此客户端与服务器共用一个 HTTPS/WSS 域名。
+公网部署目前暂停。项目根目录仍保留 `render.yaml`，后续恢复时可以继续使用。生产环境由同一个 Web Service 同时提供网页和 Socket.IO，因此客户端与服务器共用一个 HTTPS/WSS 域名。

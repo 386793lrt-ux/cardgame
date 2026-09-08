@@ -1,6 +1,6 @@
 {
   "name": "@riftbound/client",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,8 +13,7 @@
     "@vitejs/plugin-react": "latest",
     "vite": "latest",
     "react": "latest",
-    "react-dom": "latest",
-    "socket.io-client": "^4.8.1"
+    "react-dom": "latest"
   },
   "devDependencies": {
     "@types/react": "latest",

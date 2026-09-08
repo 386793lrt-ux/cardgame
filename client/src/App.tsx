@@ -1,14 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  CARD_BY_ID,
   type ActionTarget,
-  type CardDefinition,
-  type ClientGameState,
-  type MinionState,
+  type CardView,
+  type MinionView,
+  type PlayerViewState,
   type PublicPlayerState,
-  type RoomState
+  type RoomState,
+  translateZhCn
 } from "@riftbound/shared";
-import { socket } from "./socket";
+import { errorMessage } from "./errorMessages";
+import { gameClient } from "./gameClient";
 
 type LobbyMode = "HOME" | "JOIN";
 
@@ -37,21 +38,20 @@ function Hero({ player, enemy, targetable, onClick }: {
 }
 
 function Minion({ minion, selected, targetable, onClick }: {
-  minion: MinionState;
+  minion: MinionView;
   selected?: boolean;
   targetable?: boolean;
   onClick?: () => void;
 }) {
-  const card = CARD_BY_ID.get(minion.cardId);
   return (
     <button
       className={`minion ${minion.canAttack ? "ready" : ""} ${selected ? "selected" : ""} ${targetable ? "targetable" : ""}`}
       onClick={onClick}
       disabled={!onClick}
-      aria-label={`${card?.name ?? "随从"}，${minion.attack} 攻击，${minion.health} 生命`}
+      aria-label={`${translateZhCn(minion.nameKey)}，${minion.attack} 攻击，${minion.health} 生命`}
     >
-      <span className="minion-rune">{card?.rune ?? "?"}</span>
-      <span className="minion-name">{card?.name}</span>
+      <span className="minion-rune">{minion.rune}</span>
+      <span className="minion-name">{translateZhCn(minion.nameKey)}</span>
       <span className="stat attack">⚔ {minion.attack}</span>
       <span className="stat health">♥ {minion.health}</span>
       {!minion.canAttack && <span className="sleep-mark">休整</span>}
@@ -60,7 +60,7 @@ function Minion({ minion, selected, targetable, onClick }: {
 }
 
 function Card({ card, selected, playable, index, onClick }: {
-  card: CardDefinition;
+  card: CardView;
   selected: boolean;
   playable: boolean;
   index: number;
@@ -70,13 +70,13 @@ function Card({ card, selected, playable, index, onClick }: {
     <button
       className={`card ${card.type.toLowerCase()} ${selected ? "selected" : ""} ${playable ? "playable" : ""}`}
       onClick={onClick}
-      aria-label={`第 ${index + 1} 张手牌，${card.name}，费用 ${card.cost}`}
+      aria-label={`第 ${index + 1} 张手牌，${translateZhCn(card.nameKey)}，费用 ${card.cost}`}
     >
       <span className="card-cost">{card.cost}</span>
       <span className="card-art"><span>{card.rune}</span></span>
-      <span className="card-name">{card.name}</span>
+      <span className="card-name">{translateZhCn(card.nameKey)}</span>
       <span className="card-type">{card.type === "MINION" ? "随从" : "法术"}</span>
-      <span className="card-description">{card.description}</span>
+      <span className="card-description">{translateZhCn(card.descriptionKey)}</span>
       {card.type === "MINION" && (
         <>
           <span className="card-stat attack">{card.attack}</span>
@@ -113,11 +113,11 @@ function Lobby({ connected, mode, setMode, error, room }: {
 
   const create = () => {
     setBusy(true);
-    socket.emit("createRoom", { playerName: name }, () => setBusy(false));
+    void gameClient.createRoom(name).finally(() => setBusy(false));
   };
   const join = () => {
     setBusy(true);
-    socket.emit("joinRoom", { roomId: code, playerName: name }, () => setBusy(false));
+    void gameClient.joinRoom(code, name).finally(() => setBusy(false));
   };
 
   if (room) {
@@ -173,10 +173,10 @@ function Lobby({ connected, mode, setMode, error, room }: {
 }
 
 export function App() {
-  const [connected, setConnected] = useState(socket.connected);
+  const [connected, setConnected] = useState(gameClient.isConnected());
   const [mode, setMode] = useState<LobbyMode>("HOME");
   const [room, setRoom] = useState<RoomState | null>(null);
-  const [game, setGame] = useState<ClientGameState | null>(null);
+  const [game, setGame] = useState<PlayerViewState | null>(null);
   const [error, setError] = useState("");
   const [selectedHand, setSelectedHand] = useState<number | null>(null);
   const [selectedAttacker, setSelectedAttacker] = useState<string | null>(null);
@@ -187,34 +187,30 @@ export function App() {
   }, [error]);
 
   useEffect(() => {
-    const onConnect = () => setConnected(true);
-    const onDisconnect = () => setConnected(false);
     const onRoom = (nextRoom: RoomState) => setRoom(nextRoom);
-    const onGame = (nextGame: ClientGameState) => {
+    const onGame = (nextGame: PlayerViewState) => {
       setGame(nextGame);
       setSelectedHand(null);
       setSelectedAttacker(null);
     };
-    const onError = ({ message }: { message: string }) => setError(message);
-    socket.on("connect", onConnect);
-    socket.on("disconnect", onDisconnect);
-    socket.on("roomState", onRoom);
-    socket.on("gameState", onGame);
-    socket.on("error", onError);
+    const unsubscribers = [
+      gameClient.onConnectionChange(setConnected),
+      gameClient.onRoomState(onRoom),
+      gameClient.onGameUpdate(onGame),
+      gameClient.onError((code) => setError(errorMessage(code)))
+    ];
+    gameClient.connect();
     return () => {
-      socket.off("connect", onConnect);
-      socket.off("disconnect", onDisconnect);
-      socket.off("roomState", onRoom);
-      socket.off("gameState", onGame);
-      socket.off("error", onError);
+      unsubscribers.forEach((unsubscribe) => unsubscribe());
+      gameClient.disconnect();
     };
   }, []);
 
-  const isYourTurn = game?.currentPlayerId === game?.you.id && game?.status === "PLAYING";
+  const isYourTurn = game?.currentPlayerId === game?.you.playerId && game?.status === "PLAYING";
   const selectedCard = selectedHand === null ? null : game?.you.hand[selectedHand] ?? null;
   const targetMode = useMemo(() => {
     if (!selectedCard || selectedCard.type !== "SPELL") return null;
-    if (selectedCard.effect.type === "DAMAGE") return "ENEMY";
+    if (selectedCard.effect.type === "DEAL_DAMAGE") return "ENEMY";
     if (selectedCard.effect.type === "BUFF") return "FRIENDLY_MINION";
     return null;
   }, [selectedCard]);
@@ -225,17 +221,18 @@ export function App() {
     if (!isYourTurn) return setError("现在是对手的回合。");
     const card = game.you.hand[index];
     if (!card || card.cost > game.you.mana) return setError("法力不足。");
-    if (card.type === "SPELL" && (card.effect.type === "DAMAGE" || card.effect.type === "BUFF")) {
+    if (card.type === "SPELL" && (card.effect.type === "DEAL_DAMAGE" || card.effect.type === "BUFF")) {
       setSelectedAttacker(null);
       setSelectedHand(selectedHand === index ? null : index);
       return;
     }
-    socket.emit("playCard", { handIndex: index });
+    gameClient.playCard(card.instanceId);
   };
 
-  const chooseFriendlyMinion = (minion: MinionState) => {
+  const chooseFriendlyMinion = (minion: MinionView) => {
     if (selectedHand !== null && targetMode === "FRIENDLY_MINION") {
-      socket.emit("playCard", { handIndex: selectedHand, target: { type: "MINION", playerId: game.you.id, instanceId: minion.instanceId } });
+      const card = game.you.hand[selectedHand];
+      if (card) gameClient.playCard(card.instanceId, { type: "MINION", playerId: game.you.playerId, instanceId: minion.instanceId });
       return;
     }
     if (!isYourTurn || !minion.canAttack) return;
@@ -245,13 +242,14 @@ export function App() {
 
   const chooseEnemyTarget = (target: ActionTarget) => {
     if (selectedHand !== null && targetMode === "ENEMY") {
-      socket.emit("playCard", { handIndex: selectedHand, target });
+      const card = game.you.hand[selectedHand];
+      if (card) gameClient.playCard(card.instanceId, target);
     } else if (selectedAttacker) {
-      socket.emit("attack", { attackerInstanceId: selectedAttacker, target });
+      gameClient.attack(selectedAttacker, target);
     }
   };
 
-  const resultText = game.status === "FINISHED" ? (game.winnerId === game.you.id ? "胜利" : "败北") : "";
+  const resultText = game.status === "FINISHED" ? (game.winnerId === game.you.playerId ? "胜利" : "败北") : "";
   const interactionHint = selectedCard
     ? targetMode === "ENEMY" ? "选择一个敌方目标" : "选择一个己方随从"
     : selectedAttacker ? "选择攻击目标" : isYourTurn ? "你的回合" : "对手正在行动";
@@ -261,7 +259,10 @@ export function App() {
       <header className="game-header">
         <div><span className="tiny-label">房间</span><strong>{game.roomId}</strong></div>
         <div className="turn-banner"><span>回合 {game.turn}</span><b>{interactionHint}</b></div>
-        <div className={`server-dot ${connected ? "online" : ""}`}>{connected ? "联机中" : "连接中断"}</div>
+        <div className="header-actions">
+          <div className={`server-dot ${connected ? "online" : ""}`}>{connected ? "联机中" : "连接中断"}</div>
+          <button className="surrender" onClick={() => gameClient.surrender()} disabled={game.status !== "PLAYING"}>认输</button>
+        </div>
       </header>
 
       <section className="battle-table">
@@ -271,7 +272,7 @@ export function App() {
               player={game.opponent}
               enemy
               targetable={Boolean(selectedAttacker || targetMode === "ENEMY")}
-              onClick={selectedAttacker || targetMode === "ENEMY" ? () => chooseEnemyTarget({ type: "HERO", playerId: game.opponent.id }) : undefined}
+              onClick={selectedAttacker || targetMode === "ENEMY" ? () => chooseEnemyTarget({ type: "HERO", playerId: game.opponent.playerId }) : undefined}
             />
             <div className="opponent-resources">
               <span>牌库 {game.opponent.deckCount}</span>
@@ -284,7 +285,7 @@ export function App() {
           <div className="board enemy-board">
             {game.opponent.board.length === 0 && <span className="empty-board">敌方战场</span>}
             {game.opponent.board.map((minion) => (
-              <Minion key={minion.instanceId} minion={minion} targetable={Boolean(selectedAttacker || targetMode === "ENEMY")} onClick={selectedAttacker || targetMode === "ENEMY" ? () => chooseEnemyTarget({ type: "MINION", playerId: game.opponent.id, instanceId: minion.instanceId }) : undefined} />
+              <Minion key={minion.instanceId} minion={minion} targetable={Boolean(selectedAttacker || targetMode === "ENEMY")} onClick={selectedAttacker || targetMode === "ENEMY" ? () => chooseEnemyTarget({ type: "MINION", playerId: game.opponent.playerId, instanceId: minion.instanceId }) : undefined} />
             ))}
           </div>
         </div>
@@ -301,7 +302,7 @@ export function App() {
           <div className="hero-row friendly-row">
             <Hero player={game.you} />
             <Mana current={game.you.mana} max={game.you.maxMana} />
-            <button className="end-turn" onClick={() => socket.emit("endTurn")} disabled={!isYourTurn}>结束回合</button>
+            <button className="end-turn" onClick={() => gameClient.endTurn()} disabled={!isYourTurn}>结束回合</button>
             <span className="deck-count">牌库 {game.you.deckCount}</span>
           </div>
         </div>
@@ -309,16 +310,16 @@ export function App() {
 
       <section className="hand-zone" aria-label="你的手牌">
         {game.you.hand.map((card, index) => (
-          <Card key={`${card.id}-${index}`} card={card} index={index} selected={selectedHand === index} playable={Boolean(isYourTurn && card.cost <= game.you.mana)} onClick={() => playFromHand(index)} />
+          <Card key={card.instanceId} card={card} index={index} selected={selectedHand === index} playable={Boolean(isYourTurn && card.cost <= game.you.mana)} onClick={() => playFromHand(index)} />
         ))}
       </section>
 
       {error && <div className="toast" role="alert">{error}</div>}
       {game.status === "FINISHED" && (
         <div className="game-over" role="dialog" aria-modal="true">
-          <div className="result-sigil">{game.winnerId === game.you.id ? "✦" : "◇"}</div>
+          <div className="result-sigil">{game.winnerId === game.you.playerId ? "✦" : "◇"}</div>
           <h2>{resultText}</h2>
-          <p>{game.winnerId === game.you.id ? "裂隙回应了你的意志。" : "石桌归于寂静，下一局再会。"}</p>
+          <p>{game.winnerId === game.you.playerId ? "裂隙回应了你的意志。" : "石桌归于寂静，下一局再会。"}</p>
           <button onClick={() => window.location.reload()}>返回大厅</button>
         </div>
       )}

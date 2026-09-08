@@ -113,7 +113,9 @@ button:disabled { cursor: not-allowed; opacity: .42; }
 .turn-banner { text-align: center; display: flex; flex-direction: column; line-height: 1.15; }
 .turn-banner span { color: #8d8676; font-size: .72rem; }
 .turn-banner b { color: var(--gold-bright); font-size: .9rem; letter-spacing: .08em; }
-.server-dot { justify-self: end; color: #b76a6a; font-size: .75rem; }.server-dot.online { color: #66a687; }
+.header-actions { justify-self: end; display: flex; align-items: center; gap: 12px; }
+.server-dot { color: #b76a6a; font-size: .75rem; }.server-dot.online { color: #66a687; }
+.surrender { border: 1px solid #594549; border-radius: 4px; padding: 4px 9px; color: #a99b9b; background: #21171a; cursor: pointer; font-size: .7rem; }
 
 .battle-table { position: relative; display: grid; grid-template-rows: 1fr 22px 1fr; padding: 8px 4vw; overflow: hidden; }
 .battle-table::before {
