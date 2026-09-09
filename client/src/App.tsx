@@ -1,348 +1,161 @@
-import { useEffect, useMemo, useState } from "react";
-import {
-  type ActionTarget,
-  type CardView,
-  type ConnectionStatus,
-  type MinionView,
-  type PlayerViewState,
-  type PublicPlayerState,
-  type RoomState,
-  translateZhCn
-} from "@riftbound/shared";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { type ActionTarget, type CardView, type ConnectionStatus, type GameEvent, type MinionView, type PlayerViewState, type RoomState } from "@riftbound/shared";
+import { audioManager, type GameSound } from "./audioManager";
+import { Board } from "./components/Board";
+import { GameOverOverlay } from "./components/GameOverOverlay";
+import { Hand } from "./components/Hand";
+import { Hero } from "./components/Hero";
+import { Mana } from "./components/Mana";
+import { TurnBanner } from "./components/TurnBanner";
 import { errorMessage } from "./errorMessages";
 import { gameClient } from "./gameClient";
+import { emptySelection, isCardPlayable, isLegalTarget, isYourTurn, presentationFromEvents, targetModeForCard, type PendingAction, type PresentationState, type SelectionState } from "./uiModel";
 
 type LobbyMode = "HOME" | "JOIN";
-
-function HealthGem({ value }: { value: number }) {
-  return <span className="health-gem" aria-label={`${value} 点生命`}>♥ {Math.max(0, value)}</span>;
-}
-
-function Hero({ player, enemy, targetable, onClick }: {
-  player: PublicPlayerState;
-  enemy?: boolean;
-  targetable?: boolean;
-  onClick?: () => void;
-}) {
-  return (
-    <button
-      className={`hero ${enemy ? "enemy" : "friendly"} ${targetable ? "targetable" : ""}`}
-      onClick={onClick}
-      disabled={!onClick}
-      aria-label={`${enemy ? "敌方" : "己方"}英雄 ${player.name}，${player.health} 点生命`}
-    >
-      <span className="hero-sigil">{enemy ? "☽" : "☀"}</span>
-      <span className="hero-name">{player.name}</span>
-      <HealthGem value={player.health} />
-    </button>
-  );
-}
-
-function Minion({ minion, selected, targetable, onClick }: {
-  minion: MinionView;
-  selected?: boolean;
-  targetable?: boolean;
-  onClick?: () => void;
-}) {
-  return (
-    <button
-      className={`minion ${minion.canAttack ? "ready" : ""} ${selected ? "selected" : ""} ${targetable ? "targetable" : ""}`}
-      onClick={onClick}
-      disabled={!onClick}
-      aria-label={`${translateZhCn(minion.nameKey)}，${minion.attack} 攻击，${minion.health} 生命`}
-    >
-      <span className="minion-rune">{minion.rune}</span>
-      <span className="minion-name">{translateZhCn(minion.nameKey)}</span>
-      <span className="stat attack">⚔ {minion.attack}</span>
-      <span className="stat health">♥ {minion.health}</span>
-      {!minion.canAttack && <span className="sleep-mark">休整</span>}
-    </button>
-  );
-}
-
-function Card({ card, selected, playable, index, onClick }: {
-  card: CardView;
-  selected: boolean;
-  playable: boolean;
-  index: number;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      className={`card ${card.type.toLowerCase()} ${selected ? "selected" : ""} ${playable ? "playable" : ""}`}
-      onClick={onClick}
-      aria-label={`第 ${index + 1} 张手牌，${translateZhCn(card.nameKey)}，费用 ${card.cost}`}
-    >
-      <span className="card-cost">{card.cost}</span>
-      <span className="card-art"><span>{card.rune}</span></span>
-      <span className="card-name">{translateZhCn(card.nameKey)}</span>
-      <span className="card-type">{card.type === "MINION" ? "随从" : "法术"}</span>
-      <span className="card-description">{translateZhCn(card.descriptionKey)}</span>
-      {card.type === "MINION" && (
-        <>
-          <span className="card-stat attack">{card.attack}</span>
-          <span className="card-stat health">{card.health}</span>
-        </>
-      )}
-    </button>
-  );
-}
-
-function Mana({ current, max }: { current: number; max: number }) {
-  return (
-    <div className="mana" aria-label={`${current}/${max} 法力`}>
-      <span className="mana-count">◈ {current}/{max}</span>
-      <span className="crystals">
-        {Array.from({ length: max }, (_, index) => (
-          <i key={index} className={index < current ? "full" : "spent"} />
-        ))}
-      </span>
-    </div>
-  );
-}
+const emptyPresentation: PresentationState = { nonce: 0, floatingNumbers: [], summonedIds: [], dyingMinions: [], impactedIds: [] };
 
 function connectionText(status: ConnectionStatus): string {
-  if (status === "CONNECTED") return "● 服务器已连接";
-  if (status === "CONNECTING") return "○ 服务器连接中……";
-  if (status === "RECONNECTING") return "○ 网络断开，正在重新连接……";
-  if (status === "FAILED") return "○ 无法连接服务器";
-  return "○ 已断开连接";
+  if (status === "CONNECTED") return "已连接";
+  if (status === "CONNECTING") return "正在连接";
+  if (status === "RECONNECTING") return "正在恢复对局";
+  if (status === "FAILED") return "无法连接服务器";
+  return "网络断开";
 }
 
-function Lobby({ connectionStatus, mode, setMode, error, room }: {
-  connectionStatus: ConnectionStatus;
-  mode: LobbyMode;
-  setMode: (mode: LobbyMode) => void;
-  error: string;
-  room: RoomState | null;
-}) {
-  const connected = connectionStatus === "CONNECTED";
+function Lobby({ connectionStatus, room, error }: { connectionStatus: ConnectionStatus; room: RoomState | null; error: string }) {
+  const [mode, setMode] = useState<LobbyMode>("HOME");
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
+  const connected = connectionStatus === "CONNECTED";
+  const create = async () => { if (busy) return; setBusy(true); await gameClient.createRoom(name); setBusy(false); };
+  const join = async () => { if (busy) return; setBusy(true); await gameClient.joinRoom(code, name); setBusy(false); };
 
-  const create = () => {
-    setBusy(true);
-    void gameClient.createRoom(name).finally(() => setBusy(false));
-  };
-  const join = () => {
-    setBusy(true);
-    void gameClient.joinRoom(code, name).finally(() => setBusy(false));
-  };
-
-  if (room) {
-    return (
-      <main className="lobby-shell">
-        <section className="lobby-panel waiting-panel">
-          <div className="brand-mark">✦</div>
-          <p className="eyebrow">裂隙牌局</p>
-          <h1>等待另一位旅者</h1>
-          <p className="room-code-label">房间码</p>
-          <strong className="room-code">{room.roomId}</strong>
-          <p className="waiting-note">把六位房间码告诉朋友，加入后牌局会自动开始。</p>
-          <div className="seat-list">
-            <span>玩家 1</span><b>{room.players[0]?.name}</b>
-            <span>玩家 2</span><b className="empty-seat">等待加入…</b>
-          </div>
-          <div className="pulse-orbit" aria-hidden="true"><i /><i /><i /></div>
-        </section>
-      </main>
-    );
-  }
-
-  return (
-    <main className="lobby-shell">
-      <section className="lobby-panel">
-        <div className="brand-mark">✦</div>
-        <p className="eyebrow">双人回合制卡牌对决</p>
-        <h1>裂隙牌局</h1>
-        <p className="lobby-intro">在石桌两端召唤异界生灵，以法术改写胜负。</p>
-        <label className="field-label" htmlFor="player-name">你的称号</label>
-        <input id="player-name" maxLength={16} value={name} onChange={(event) => setName(event.target.value)} placeholder="无名旅者" />
-
-        {mode === "HOME" ? (
-          <div className="lobby-actions">
-            <button className="primary-action" onClick={create} disabled={!connected || busy}>创建房间</button>
-            <button className="secondary-action" onClick={() => setMode("JOIN")} disabled={!connected}>加入房间</button>
-          </div>
-        ) : (
-          <div className="join-form">
-            <label className="field-label" htmlFor="room-code">六位房间码</label>
-            <input id="room-code" inputMode="numeric" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))} placeholder="482913" />
-            <div className="lobby-actions">
-              <button className="primary-action" onClick={join} disabled={!connected || busy || code.length !== 6}>进入牌局</button>
-              <button className="secondary-action" onClick={() => setMode("HOME")}>返回</button>
-            </div>
-          </div>
-        )}
-        <p className={`connection ${connected ? "online" : "offline"}`}>{connectionText(connectionStatus)}</p>
-        {error && <p className="lobby-error" role="alert">{error}</p>}
-      </section>
-    </main>
+  if (room) return (
+    <main className="lobby-shell"><section className="lobby-panel waiting-panel">
+      <div className="brand-mark">✦</div><p className="eyebrow">好友对战</p><h1>召集旅伴</h1>
+      <p className="room-code-label">六位房间码</p><strong className="room-code">{room.roomId}</strong>
+      <button className="copy-code" onClick={() => void navigator.clipboard?.writeText(room.roomId)}>复制房间码</button>
+      <p className="waiting-note">将房间码告诉朋友，第二位玩家加入后牌局会自动开始。</p>
+      <div className="versus-seats"><div><i>Ⅰ</i><span>{room.players[0]?.name || "玩家 1"}</span></div><b>VS</b><div className="vacant"><i>Ⅱ</i><span>等待对手…</span></div></div>
+      <div className="pulse-orbit" aria-hidden="true"><i /><i /><i /></div>
+    </section></main>
   );
+  return (
+    <main className="lobby-shell"><section className="lobby-panel">
+      <div className="brand-mark">✦</div><p className="eyebrow">双人回合制卡牌对决</p><h1>裂隙牌局</h1>
+      <p className="lobby-intro">在古老石桌两端召唤异界生灵，以法术改写胜负。</p>
+      <label className="field-label" htmlFor="player-name">旅者称号</label><input id="player-name" maxLength={16} value={name} onChange={(event) => setName(event.target.value)} placeholder="无名旅者" />
+      {mode === "HOME" ? <div className="lobby-actions"><button className="primary-action" onClick={() => void create()} disabled={!connected || busy}>创建房间</button><button className="secondary-action" onClick={() => setMode("JOIN")} disabled={!connected}>加入房间</button></div> : <div className="join-form"><label className="field-label" htmlFor="room-code">六位房间码</label><input id="room-code" inputMode="numeric" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))} placeholder="482913" /><div className="lobby-actions"><button className="primary-action" onClick={() => void join()} disabled={!connected || busy || code.length !== 6}>进入牌局</button><button className="secondary-action" onClick={() => setMode("HOME")}>返回</button></div></div>}
+      <p className={`connection ${connected ? "online" : "offline"}`}><i />{connectionText(connectionStatus)}</p>{error && <p className="lobby-error" role="alert">{error}</p>}
+    </section></main>
+  );
+}
+
+function playSounds(events: readonly GameEvent[], viewerId: string): void {
+  const sounds = new Set<GameSound>();
+  for (const event of events) {
+    if (event.type === "CARD_PLAYED") sounds.add("playCard");
+    if (event.type === "CARD_DRAWN" && event.playerId === viewerId) sounds.add("draw");
+    if (event.type === "DAMAGE_DEALT") sounds.add("damage");
+    if (event.type === "HEAL_APPLIED") sounds.add("heal");
+    if (event.type === "TURN_STARTED" && event.playerId === viewerId) sounds.add("turnStart");
+    if (event.type === "GAME_OVER") sounds.add(event.winnerId === viewerId ? "victory" : "defeat");
+  }
+  sounds.forEach((sound) => audioManager.play(sound));
 }
 
 export function App() {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(gameClient.getConnectionStatus());
-  const [mode, setMode] = useState<LobbyMode>("HOME");
   const [room, setRoom] = useState<RoomState | null>(null);
   const [game, setGame] = useState<PlayerViewState | null>(null);
+  const gameRef = useRef<PlayerViewState | null>(null);
+  const presentationNonce = useRef(0);
   const [error, setError] = useState("");
-  const [selectedHand, setSelectedHand] = useState<number | null>(null);
-  const [selectedAttacker, setSelectedAttacker] = useState<string | null>(null);
+  const [selection, setSelection] = useState<SelectionState>(emptySelection());
+  const [inspectedCard, setInspectedCard] = useState<CardView | null>(null);
+  const [pending, setPending] = useState<PendingAction>(null);
+  const [presentation, setPresentation] = useState<PresentationState>(emptyPresentation);
+  const [showIntro, setShowIntro] = useState(false);
 
+  useEffect(() => { if (!error) return; const timer = window.setTimeout(() => setError(""), 2600); return () => window.clearTimeout(timer); }, [error]);
+  useEffect(() => { if (!presentation.nonce) return; const timer = window.setTimeout(() => setPresentation((current) => current.nonce === presentation.nonce ? { ...emptyPresentation, nonce: current.nonce } : current), 1050); return () => window.clearTimeout(timer); }, [presentation.nonce]);
+  useEffect(() => { if (!showIntro) return; const timer = window.setTimeout(() => setShowIntro(false), 1250); return () => window.clearTimeout(timer); }, [showIntro]);
   useEffect(() => {
-    const clearMessage = window.setTimeout(() => error && setError(""), 4000);
-    return () => window.clearTimeout(clearMessage);
-  }, [error]);
-
+    const cancel = (event: KeyboardEvent) => { if (event.key === "Escape") { setSelection(emptySelection(gameRef.current?.gameId)); setInspectedCard(null); } };
+    window.addEventListener("keydown", cancel); return () => window.removeEventListener("keydown", cancel);
+  }, []);
   useEffect(() => {
-    const onRoom = (nextRoom: RoomState) => setRoom(nextRoom);
-    const onGame = (nextGame: PlayerViewState) => {
-      setGame(nextGame);
-      setSelectedHand(null);
-      setSelectedAttacker(null);
+    const onGame = (nextGame: PlayerViewState, events: GameEvent[]) => {
+      const previous = gameRef.current;
+      presentationNonce.current += 1;
+      setPresentation(presentationFromEvents(events, nextGame.you.playerId, previous, presentationNonce.current));
+      playSounds(events, nextGame.you.playerId);
+      if (!previous || previous.gameId !== nextGame.gameId || events.some((event) => event.type === "GAME_STARTED")) setShowIntro(true);
+      gameRef.current = nextGame; setGame(nextGame); setSelection(emptySelection(nextGame.gameId)); setInspectedCard(null); setPending(null);
     };
     const unsubscribers = [
-      gameClient.onConnectionChange(setConnectionStatus),
-      gameClient.onRoomState(onRoom),
-      gameClient.onGameUpdate(onGame),
+      gameClient.onConnectionChange(setConnectionStatus), gameClient.onRoomState(setRoom), gameClient.onGameUpdate(onGame),
       gameClient.onError((code) => setError(errorMessage(code))),
-      gameClient.onOpponentConnection((connected) => {
-        setGame((current) => current ? { ...current, opponentConnected: connected } : current);
-        setError(connected ? "对手已重新连接。" : "对手已断开连接，等待对手重连……");
-      })
+      gameClient.onOpponentConnection((connected) => { setGame((current) => current ? { ...current, opponentConnected: connected } : current); setError(connected ? "对手已重新连接，可以继续对局。" : "对手已断开，正在等待其恢复对局……"); })
     ];
-    gameClient.connect();
-    return () => {
-      unsubscribers.forEach((unsubscribe) => unsubscribe());
-      gameClient.disconnect();
-    };
+    gameClient.connect(); return () => { unsubscribers.forEach((unsubscribe) => unsubscribe()); gameClient.disconnect(); };
   }, []);
 
-  const isYourTurn = game?.currentPlayerId === game?.you.playerId && game?.status === "PLAYING";
-  const selectedCard = selectedHand === null ? null : game?.you.hand[selectedHand] ?? null;
-  const targetMode = useMemo(() => {
-    if (!selectedCard || selectedCard.type !== "SPELL") return null;
-    if (selectedCard.effect.type === "DEAL_DAMAGE") return "ENEMY";
-    if (selectedCard.effect.type === "BUFF") return "FRIENDLY_MINION";
-    return null;
-  }, [selectedCard]);
+  const selectedCard = game?.you.hand.find((card) => card.instanceId === selection.cardInstanceId);
+  const targetMode = targetModeForCard(selectedCard);
+  const yourTurn = game ? isYourTurn(game) : false;
+  const enemyTargetable = Boolean(game && pending === null && (selection.attackerId || targetMode === "ENEMY"));
+  const friendlyTargetable = Boolean(game && pending === null && targetMode === "FRIENDLY_MINION");
+  const targetableEnemyIds = useMemo(() => new Set(enemyTargetable && game ? game.opponent.board.map((minion) => minion.instanceId) : []), [enemyTargetable, game]);
+  const targetableFriendlyIds = useMemo(() => new Set(friendlyTargetable && game ? game.you.board.map((minion) => minion.instanceId) : []), [friendlyTargetable, game]);
+  const summonedIds = useMemo(() => new Set(presentation.summonedIds), [presentation.summonedIds]);
+  const impactedIds = useMemo(() => new Set(presentation.impactedIds), [presentation.impactedIds]);
+  if (!game) return <Lobby connectionStatus={connectionStatus} room={room} error={error} />;
 
-  if (!game) return <Lobby connectionStatus={connectionStatus} mode={mode} setMode={setMode} error={error} room={room} />;
-
-  const connected = connectionStatus === "CONNECTED";
-
-  const playFromHand = (index: number) => {
-    if (!isYourTurn) return setError("现在是对手的回合。");
-    const card = game.you.hand[index];
-    if (!card || card.cost > game.you.mana) return setError("法力不足。");
-    if (card.type === "SPELL" && (card.effect.type === "DEAL_DAMAGE" || card.effect.type === "BUFF")) {
-      setSelectedAttacker(null);
-      setSelectedHand(selectedHand === index ? null : index);
-      return;
-    }
-    gameClient.playCard(card.instanceId);
+  const cancelSelection = () => { if (!pending) { setSelection(emptySelection(game.gameId)); setInspectedCard(null); } };
+  const perform = async (kind: Exclude<PendingAction, null>, action: () => ReturnType<typeof gameClient.endTurn>) => {
+    if (pending) return; setPending(kind); const result = await action();
+    if (!result.ok) { setError(errorMessage(result.errorCode)); setPending(null); }
   };
-
+  const playFromHand = (card: CardView) => {
+    if (pending) return;
+    if (!yourTurn) return setError("现在不是你的回合。");
+    if (!isCardPlayable(game, card, pending)) return setError("法力不足，无法打出这张牌。");
+    const mode = targetModeForCard(card);
+    if (mode) { const same = selection.cardInstanceId === card.instanceId; setSelection(same ? emptySelection(game.gameId) : { gameId: game.gameId, cardInstanceId: card.instanceId }); setInspectedCard(same ? null : card); return; }
+    void perform("PLAY_CARD", () => gameClient.playCard(card.instanceId));
+  };
   const chooseFriendlyMinion = (minion: MinionView) => {
-    if (selectedHand !== null && targetMode === "FRIENDLY_MINION") {
-      const card = game.you.hand[selectedHand];
-      if (card) gameClient.playCard(card.instanceId, { type: "MINION", playerId: game.you.playerId, instanceId: minion.instanceId });
-      return;
-    }
-    if (!isYourTurn || !minion.canAttack) return;
-    setSelectedHand(null);
-    setSelectedAttacker(selectedAttacker === minion.instanceId ? null : minion.instanceId);
+    if (pending) return;
+    if (selectedCard && targetMode === "FRIENDLY_MINION") { const target: ActionTarget = { type: "MINION", playerId: game.you.playerId, instanceId: minion.instanceId }; if (!isLegalTarget(targetMode, game, target)) return setError("无法选择这个目标。"); void perform("PLAY_CARD", () => gameClient.playCard(selectedCard.instanceId, target)); return; }
+    if (!yourTurn) return setError("现在不是你的回合。");
+    if (!minion.canAttack) return setError("这个随从本回合不能攻击。");
+    setInspectedCard(null); setSelection(selection.attackerId === minion.instanceId ? emptySelection(game.gameId) : { gameId: game.gameId, attackerId: minion.instanceId });
   };
-
   const chooseEnemyTarget = (target: ActionTarget) => {
-    if (selectedHand !== null && targetMode === "ENEMY") {
-      const card = game.you.hand[selectedHand];
-      if (card) gameClient.playCard(card.instanceId, target);
-    } else if (selectedAttacker) {
-      gameClient.attack(selectedAttacker, target);
-    }
+    if (pending) return;
+    if (selectedCard && targetMode === "ENEMY") { if (!isLegalTarget(targetMode, game, target)) return setError("无法选择这个目标。"); void perform("PLAY_CARD", () => gameClient.playCard(selectedCard.instanceId, target)); return; }
+    if (selection.attackerId) void perform("ATTACK", () => gameClient.attack(selection.attackerId!, target));
   };
 
-  const resultText = game.status === "FINISHED" ? (game.winnerId === game.you.playerId ? "胜利" : "败北") : "";
-  const interactionHint = selectedCard
-    ? targetMode === "ENEMY" ? "选择一个敌方目标" : "选择一个己方随从"
-    : selectedAttacker ? "选择攻击目标" : isYourTurn ? "你的回合" : "对手正在行动";
-
+  const hint = pending ? "等待服务器确认…" : selectedCard ? (targetMode === "ENEMY" ? "选择一个敌方目标 · ESC 取消" : "选择一个己方随从 · ESC 取消") : selection.attackerId ? "选择攻击目标 · ESC 取消" : yourTurn ? "你的回合" : "对手正在行动";
   return (
-    <main className={`game-shell ${isYourTurn ? "your-turn" : "enemy-turn"}`}>
-      <header className="game-header">
-        <div><span className="tiny-label">房间</span><strong>{game.roomId}</strong></div>
-        <div className="turn-banner"><span>回合 {game.turn}</span><b>{interactionHint}</b></div>
-        <div className="header-actions">
-          <div className={`server-dot ${connected ? "online" : ""}`}>{connectionText(connectionStatus)}</div>
-          <button className="surrender" onClick={() => gameClient.surrender()} disabled={game.status !== "PLAYING"}>认输</button>
-        </div>
-      </header>
-
-      {!game.opponentConnected && game.status === "PLAYING" && (
-        <div className="toast" role="status">对手已断开连接，等待对手重连……</div>
-      )}
-
-      <section className="battle-table">
-        <div className="enemy-zone">
-          <div className="hero-row enemy-row">
-            <Hero
-              player={game.opponent}
-              enemy
-              targetable={Boolean(selectedAttacker || targetMode === "ENEMY")}
-              onClick={selectedAttacker || targetMode === "ENEMY" ? () => chooseEnemyTarget({ type: "HERO", playerId: game.opponent.playerId }) : undefined}
-            />
-            <div className="opponent-resources">
-              <span>牌库 {game.opponent.deckCount}</span>
-              <Mana current={game.opponent.mana} max={game.opponent.maxMana} />
-            </div>
-          </div>
-          <div className="opponent-hand" aria-label={`对手有 ${game.opponent.handCount} 张手牌`}>
-            {Array.from({ length: game.opponent.handCount }, (_, index) => <i key={index} />)}
-          </div>
-          <div className="board enemy-board">
-            {game.opponent.board.length === 0 && <span className="empty-board">敌方战场</span>}
-            {game.opponent.board.map((minion) => (
-              <Minion key={minion.instanceId} minion={minion} targetable={Boolean(selectedAttacker || targetMode === "ENEMY")} onClick={selectedAttacker || targetMode === "ENEMY" ? () => chooseEnemyTarget({ type: "MINION", playerId: game.opponent.playerId, instanceId: minion.instanceId }) : undefined} />
-            ))}
-          </div>
-        </div>
-
+    <main className={`game-shell ${yourTurn ? "your-turn" : "enemy-turn"} ${pending ? "is-pending" : ""}`} onClick={(event) => { if (event.target === event.currentTarget) cancelSelection(); }}>
+      <header className="game-header"><div className="room-mark"><span className="tiny-label">房间</span><strong>{game.roomId}</strong></div><div className="turn-status"><span>第 {game.turn} 回合</span><b>{hint}</b></div><div className="header-actions"><div className={`server-dot ${connectionStatus === "CONNECTED" ? "online" : ""}`}><i />{connectionText(connectionStatus)}</div><button className="surrender" onClick={(event) => { event.stopPropagation(); void perform("SURRENDER", () => gameClient.surrender()); }} disabled={game.status !== "PLAYING" || pending !== null}>认输</button></div></header>
+      {connectionStatus !== "CONNECTED" && <div className="network-recovery" role="status"><i />网络断开，正在尝试恢复原对局……</div>}
+      <section className="battle-table" onClick={cancelSelection}>
+        <div className="table-ornament top-left">◆</div><div className="table-ornament top-right">◆</div>
+        <div className="enemy-zone"><div className="opponent-hand" aria-label={`对手有 ${game.opponent.handCount} 张手牌`}>{Array.from({ length: game.opponent.handCount }, (_, index) => <i key={index} style={{ "--back-i": index, "--back-count": game.opponent.handCount } as React.CSSProperties} />)}<span>对方手牌 {game.opponent.handCount}</span></div><div className="hero-row enemy-row"><Hero player={game.opponent} enemy targetable={enemyTargetable} impacted={impactedIds.has(game.opponent.playerId)} floating={presentation.floatingNumbers.filter((cue) => cue.targetId === game.opponent.playerId)} onClick={enemyTargetable ? () => chooseEnemyTarget({ type: "HERO", playerId: game.opponent.playerId }) : undefined} /><div className="opponent-resources"><span>牌库 {game.opponent.deckCount}</span><Mana current={game.opponent.mana} max={game.opponent.maxMana} compact /></div></div><Board minions={game.opponent.board} owner="OPPONENT" targetableIds={targetableEnemyIds} summonedIds={summonedIds} dying={presentation.dyingMinions} attackingId={presentation.attackingId} impactedIds={impactedIds} floating={presentation.floatingNumbers} onMinion={(minion) => chooseEnemyTarget({ type: "MINION", playerId: game.opponent.playerId, instanceId: minion.instanceId })} /></div>
         <div className="rift-line"><span>✦</span></div>
-
-        <div className="friendly-zone">
-          <div className="board friendly-board">
-            {game.you.board.length === 0 && <span className="empty-board">己方战场</span>}
-            {game.you.board.map((minion) => (
-              <Minion key={minion.instanceId} minion={minion} selected={selectedAttacker === minion.instanceId} targetable={targetMode === "FRIENDLY_MINION"} onClick={(isYourTurn && minion.canAttack) || targetMode === "FRIENDLY_MINION" ? () => chooseFriendlyMinion(minion) : undefined} />
-            ))}
-          </div>
-          <div className="hero-row friendly-row">
-            <Hero player={game.you} />
-            <Mana current={game.you.mana} max={game.you.maxMana} />
-            <button className="end-turn" onClick={() => gameClient.endTurn()} disabled={!isYourTurn}>结束回合</button>
-            <span className="deck-count">牌库 {game.you.deckCount}</span>
-          </div>
-        </div>
+        <div className="friendly-zone"><Board minions={game.you.board} owner="YOU" selectedAttacker={selection.attackerId} targetableIds={targetableFriendlyIds} summonedIds={summonedIds} dying={presentation.dyingMinions} attackingId={presentation.attackingId} impactedIds={impactedIds} floating={presentation.floatingNumbers} onMinion={chooseFriendlyMinion} /><div className="hero-row friendly-row"><div className="local-resources"><Mana current={game.you.mana} max={game.you.maxMana} /><span>魔力源泉</span></div><Hero player={game.you} impacted={impactedIds.has(game.you.playerId)} floating={presentation.floatingNumbers.filter((cue) => cue.targetId === game.you.playerId)} /><button className="end-turn" onClick={(event) => { event.stopPropagation(); void perform("END_TURN", () => gameClient.endTurn()); }} disabled={!yourTurn || pending !== null}><span>{pending === "END_TURN" ? "确认中" : yourTurn ? "结束回合" : "对手回合"}</span><i /></button></div></div>
       </section>
-
-      <section className="hand-zone" aria-label="你的手牌">
-        {game.you.hand.map((card, index) => (
-          <Card key={card.instanceId} card={card} index={index} selected={selectedHand === index} playable={Boolean(isYourTurn && card.cost <= game.you.mana)} onClick={() => playFromHand(index)} />
-        ))}
-      </section>
-
-      {error && <div className="toast" role="alert">{error}</div>}
-      {game.status === "FINISHED" && (
-        <div className="game-over" role="dialog" aria-modal="true">
-          <div className="result-sigil">{game.winnerId === game.you.playerId ? "✦" : "◇"}</div>
-          <h2>{resultText}</h2>
-          <p>{game.winnerId === game.you.playerId ? "裂隙回应了你的意志。" : "石桌归于寂静，下一局再会。"}</p>
-          <button onClick={() => { gameClient.clearSession(); window.location.reload(); }}>返回大厅</button>
-        </div>
-      )}
+      <Hand game={game} selectedId={selection.cardInstanceId} inspectedCard={inspectedCard ?? selectedCard ?? null} drawnCardId={presentation.drawnCardId} pending={pending} onInspect={setInspectedCard} onPlay={playFromHand} />
+      {presentation.playedCard && <div className="played-card-flash" key={presentation.nonce}><span>{presentation.playedCard.rune}</span></div>}
+      <TurnBanner kind={presentation.turnBanner} />
+      {showIntro && <div className="match-intro"><div><span>{game.you.name}</span><b>VS</b><span>{game.opponent.name}</span></div></div>}
+      {error && <div className="toast" role="alert"><i>!</i>{error}</div>}
+      {game.status === "FINISHED" && <GameOverOverlay won={game.winnerId === game.you.playerId} turn={game.turn} health={game.you.health} onReturn={() => { gameClient.clearSession(); window.location.reload(); }} />}
     </main>
   );
 }

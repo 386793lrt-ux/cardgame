@@ -18,6 +18,12 @@ Pure TypeScript game-core, shared protocol, player-specific views, stable card I
 - Production build, platform-neutral Docker image, Render template, and deployment documentation.
 - React remains the debug client; Cocos receives centralized development/production network configuration.
 
-## 0.4 — to be planned after 0.3 public acceptance
+## 0.4 — game experience prototype
 
-Do not begin automatically. Likely candidates are a real Cocos Creator playable slice and platform lifecycle work, subject to the public server test results.
+- Rebuilt the React debug client into an original dark medieval fantasy game table.
+- Added adaptive fan-shaped hands, readable card detail, mana crystals, card backs, hero and minion status presentation.
+- Added explicit card/attacker selection, legal target highlighting, Escape/background cancellation, and pending action protection.
+- GameEvent now drives draw, play, summon, attack, damage, heal, death, turn and result presentation.
+- Added short CSS transform/opacity animations, floating combat numbers, friendly errors, match intro and result overlay.
+- Added an audio manager interface without bundling third-party audio assets.
+- Kept authoritative rules, opponent hand secrecy, reconnect and the existing v0.3 server behavior unchanged.
