@@ -6,19 +6,18 @@ React/Vite client, Express/Socket.IO server, two-player rooms, and the first pla
 
 ## 0.2 — cross-platform architecture
 
-- Extract deterministic pure TypeScript `game-core`.
-- Separate `CardDefinition`, `CardInstance`, and `MinionInstance`.
-- Assign stable `CARD_000001` identifiers and localization keys.
-- Introduce `PlayerAction`, `GameEvent`, `ErrorCode`, player-specific views, and seeded random provider.
-- Wrap transport in `GameClient` and retain the React client as a regression surface.
-- Add server configuration and structured safe logging.
-- Add `PlatformAdapter` with anonymous development implementation.
-- Prepare, but do not fabricate, a Cocos Creator integration layer.
+Pure TypeScript game-core, shared protocol, player-specific views, stable card IDs, GameEvent, network facade, tests, and Cocos integration preparation.
 
-## 0.3 — Cocos playable vertical slice
+## 0.3 — public multiplayer foundation
 
-Install Cocos Creator 3.x from the official source, create a real project, implement lobby/battle scenes, consume `PlayerViewState` and `GameEvent`, and produce a desktop/web preview from the same scene code. Add transport compatibility testing for the WeChat runtime.
+- Environment-driven HTTP/HTTPS and WebSocket/WSS endpoints.
+- Stable PlayerId separated from Session token and transient SocketId.
+- Automatic reconnect with a configurable grace period and authoritative state restoration.
+- Action idempotency and state revisions.
+- Runtime input validation, per-socket rate limiting, strict production CORS, cleanup, safe logs, health check, and graceful shutdown.
+- Production build, platform-neutral Docker image, Render template, and deployment documentation.
+- React remains the debug client; Cocos receives centralized development/production network configuration.
 
-## 0.4 — WeChat mini game release preparation
+## 0.4 — to be planned after 0.3 public acceptance
 
-Implement a WeChat-only platform/transport adapter, lifecycle and reconnection behavior, package-size/performance work, privacy/compliance checks, and release testing. Login, payment, ranking, and monetization remain separately scoped decisions.
+Do not begin automatically. Likely candidates are a real Cocos Creator playable slice and platform lifecycle work, subject to the public server test results.

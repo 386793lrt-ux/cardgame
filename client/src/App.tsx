@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   type ActionTarget,
   type CardView,
+  type ConnectionStatus,
   type MinionView,
   type PlayerViewState,
   type PublicPlayerState,
@@ -100,13 +101,22 @@ function Mana({ current, max }: { current: number; max: number }) {
   );
 }
 
-function Lobby({ connected, mode, setMode, error, room }: {
-  connected: boolean;
+function connectionText(status: ConnectionStatus): string {
+  if (status === "CONNECTED") return "● 服务器已连接";
+  if (status === "CONNECTING") return "○ 服务器连接中……";
+  if (status === "RECONNECTING") return "○ 网络断开，正在重新连接……";
+  if (status === "FAILED") return "○ 无法连接服务器";
+  return "○ 已断开连接";
+}
+
+function Lobby({ connectionStatus, mode, setMode, error, room }: {
+  connectionStatus: ConnectionStatus;
   mode: LobbyMode;
   setMode: (mode: LobbyMode) => void;
   error: string;
   room: RoomState | null;
 }) {
+  const connected = connectionStatus === "CONNECTED";
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -165,7 +175,7 @@ function Lobby({ connected, mode, setMode, error, room }: {
             </div>
           </div>
         )}
-        <p className={`connection ${connected ? "online" : "offline"}`}>{connected ? "● 已连接至裂隙" : "○ 正在连接服务器…"}</p>
+        <p className={`connection ${connected ? "online" : "offline"}`}>{connectionText(connectionStatus)}</p>
         {error && <p className="lobby-error" role="alert">{error}</p>}
       </section>
     </main>
@@ -173,7 +183,7 @@ function Lobby({ connected, mode, setMode, error, room }: {
 }
 
 export function App() {
-  const [connected, setConnected] = useState(gameClient.isConnected());
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(gameClient.getConnectionStatus());
   const [mode, setMode] = useState<LobbyMode>("HOME");
   const [room, setRoom] = useState<RoomState | null>(null);
   const [game, setGame] = useState<PlayerViewState | null>(null);
@@ -194,10 +204,14 @@ export function App() {
       setSelectedAttacker(null);
     };
     const unsubscribers = [
-      gameClient.onConnectionChange(setConnected),
+      gameClient.onConnectionChange(setConnectionStatus),
       gameClient.onRoomState(onRoom),
       gameClient.onGameUpdate(onGame),
-      gameClient.onError((code) => setError(errorMessage(code)))
+      gameClient.onError((code) => setError(errorMessage(code))),
+      gameClient.onOpponentConnection((connected) => {
+        setGame((current) => current ? { ...current, opponentConnected: connected } : current);
+        setError(connected ? "对手已重新连接。" : "对手已断开连接，等待对手重连……");
+      })
     ];
     gameClient.connect();
     return () => {
@@ -215,7 +229,9 @@ export function App() {
     return null;
   }, [selectedCard]);
 
-  if (!game) return <Lobby connected={connected} mode={mode} setMode={setMode} error={error} room={room} />;
+  if (!game) return <Lobby connectionStatus={connectionStatus} mode={mode} setMode={setMode} error={error} room={room} />;
+
+  const connected = connectionStatus === "CONNECTED";
 
   const playFromHand = (index: number) => {
     if (!isYourTurn) return setError("现在是对手的回合。");
@@ -260,10 +276,14 @@ export function App() {
         <div><span className="tiny-label">房间</span><strong>{game.roomId}</strong></div>
         <div className="turn-banner"><span>回合 {game.turn}</span><b>{interactionHint}</b></div>
         <div className="header-actions">
-          <div className={`server-dot ${connected ? "online" : ""}`}>{connected ? "联机中" : "连接中断"}</div>
+          <div className={`server-dot ${connected ? "online" : ""}`}>{connectionText(connectionStatus)}</div>
           <button className="surrender" onClick={() => gameClient.surrender()} disabled={game.status !== "PLAYING"}>认输</button>
         </div>
       </header>
+
+      {!game.opponentConnected && game.status === "PLAYING" && (
+        <div className="toast" role="status">对手已断开连接，等待对手重连……</div>
+      )}
 
       <section className="battle-table">
         <div className="enemy-zone">
@@ -320,7 +340,7 @@ export function App() {
           <div className="result-sigil">{game.winnerId === game.you.playerId ? "✦" : "◇"}</div>
           <h2>{resultText}</h2>
           <p>{game.winnerId === game.you.playerId ? "裂隙回应了你的意志。" : "石桌归于寂静，下一局再会。"}</p>
-          <button onClick={() => window.location.reload()}>返回大厅</button>
+          <button onClick={() => { gameClient.clearSession(); window.location.reload(); }}>返回大厅</button>
         </div>
       )}
     </main>

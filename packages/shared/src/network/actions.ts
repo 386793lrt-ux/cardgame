@@ -2,18 +2,22 @@ export type ActionTarget =
   | { type: "HERO"; playerId: string }
   | { type: "MINION"; playerId: string; instanceId: string };
 
+interface ActionMetadata {
+  playerId: string;
+  actionId: string;
+  clientSequence: number;
+}
+
 export type PlayerAction =
-  | {
+  | ActionMetadata & {
       type: "PLAY_CARD";
-      playerId: string;
       cardInstanceId: string;
       target?: ActionTarget;
     }
-  | {
+  | ActionMetadata & {
       type: "ATTACK";
-      playerId: string;
       attackerId: string;
       target: ActionTarget;
     }
-  | { type: "END_TURN"; playerId: string }
-  | { type: "SURRENDER"; playerId: string };
+  | ActionMetadata & { type: "END_TURN" }
+  | ActionMetadata & { type: "SURRENDER" };

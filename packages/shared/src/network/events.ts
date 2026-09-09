@@ -10,4 +10,6 @@ export type GameEvent =
   | { type: "HEAL_APPLIED"; targetId: string; amount: number }
   | { type: "MINION_DIED"; playerId: string; instanceId: string }
   | { type: "PLAYER_SURRENDERED"; playerId: string }
+  | { type: "PLAYER_DISCONNECTED"; playerId: string; graceExpiresAt: number }
+  | { type: "PLAYER_RECONNECTED"; playerId: string }
   | { type: "GAME_OVER"; winnerId: string };

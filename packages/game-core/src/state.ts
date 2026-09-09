@@ -33,6 +33,7 @@ export interface GameState {
   status: GameStatus;
   players: [PlayerState, PlayerState];
   randomSeed: number;
+  revision: number;
   winnerId?: string;
 }
 

@@ -17,7 +17,11 @@ const messages: Record<ErrorCode, string> = {
   [ErrorCode.GAME_ALREADY_OVER]: "这局游戏已经结束。",
   [ErrorCode.PLAYER_ID_MISMATCH]: "玩家身份验证失败。",
   [ErrorCode.INVALID_ACTION]: "无法识别这个操作。",
-  [ErrorCode.OPPONENT_DISCONNECTED]: "对手已断开连接，房间已关闭。",
+  [ErrorCode.OPPONENT_DISCONNECTED]: "对手已断开连接，正在等待重连。",
+  [ErrorCode.INVALID_SESSION]: "重连凭证无效，请重新进入房间。",
+  [ErrorCode.RECONNECT_EXPIRED]: "重连等待时间已经结束。",
+  [ErrorCode.INVALID_PAYLOAD]: "服务器拒绝了格式错误的请求。",
+  [ErrorCode.RATE_LIMITED]: "操作过于频繁，请稍后再试。",
   [ErrorCode.INTERNAL_ERROR]: "服务器暂时无法处理这个操作。"
 };
 

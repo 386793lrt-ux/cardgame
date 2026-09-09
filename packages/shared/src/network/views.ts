@@ -21,15 +21,24 @@ export interface PlayerViewState {
   turn: number;
   status: GameStatus;
   winnerId?: string;
+  stateRevision: number;
+  opponentConnected: boolean;
 }
 
 export interface RoomPlayer {
   playerId: string;
   name: string;
+  connected: boolean;
 }
 
 export interface RoomState {
   roomId: string;
   players: RoomPlayer[];
   status: GameStatus;
+}
+
+export interface PlayerSession {
+  roomId: string;
+  playerId: string;
+  sessionToken: string;
 }

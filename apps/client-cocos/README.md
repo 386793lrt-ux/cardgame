@@ -1,4 +1,4 @@
-# Cocos Creator client preparation
+# Cocos Creator client preparation (0.3)
 
 This directory is a compile-tested integration layer, not a fabricated Cocos Creator project. Cocos Creator was not found on this computer.
 
@@ -11,3 +11,5 @@ After installing a trusted Cocos Creator 3.x release through the official Cocos 
 5. Render only `PlayerViewState`; never place `GameState` in the Cocos project.
 
 The WeChat build must later supply a WeChat transport/platform adapter without adding `wx.*` to game-core or the server.
+
+`src/network/NetworkConfig.ts` selects the development or production server URL in one place. Production URLs must use `https://`; Socket.IO automatically upgrades to secure `wss://`. Supply a Cocos-backed `SessionStore` so the reconnect token survives application restarts.

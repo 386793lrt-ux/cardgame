@@ -1,6 +1,6 @@
-# 裂隙牌局（Riftbound Duel）0.2
+# 裂隙牌局（Riftbound Duel）0.3
 
-原创的双人在线 1v1 回合制卡牌游戏。0.2 将确定性规则、公共协议、服务端和客户端分层，为 Cocos Creator、微信小游戏及未来 PC 平台做准备。服务端是唯一权威状态源，客户端只提交 `PlayerAction`。
+原创的双人在线 1v1 回合制卡牌游戏。0.3 增加公网部署、稳定玩家会话、断线重连、操作防重复、运行时验证、限流和房间清理。服务端仍是唯一权威状态源。
 
 ## 目录
 
@@ -21,7 +21,7 @@ npm run dev
 - 客户端：http://localhost:5173
 - 游戏服务器：http://localhost:3001
 
-局域网中的朋友可用 `http://你的电脑局域网IP:5173` 打开客户端。若要跨公网联机，需要把 5173/3001 部署到公网或配置端口转发；生产环境可通过 `VITE_SERVER_URL` 指定服务器地址。
+公网环境通过 `VITE_GAME_SERVER_URL` 或同源部署连接，详见 `docs/deployment.md`。不要通过家庭路由器端口转发暴露开发电脑。
 
 ## 验证
 
@@ -31,6 +31,6 @@ npm run typecheck
 npm run build
 ```
 
-## Render 公网部署
+## 公网部署
 
-公网部署目前暂停。项目根目录仍保留 `render.yaml`，后续恢复时可以继续使用。生产环境由同一个 Web Service 同时提供网页和 Socket.IO，因此客户端与服务器共用一个 HTTPS/WSS 域名。
+项目支持普通 Node.js Hosting、Docker 和 `render.yaml`。生产环境由同一个服务提供网页、HTTPS API 和 Socket.IO/WSS，也可以通过配置把客户端与服务器分开部署。

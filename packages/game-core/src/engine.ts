@@ -117,7 +117,8 @@ export function createGame(
     currentPlayerId: states[firstIndex].playerId,
     status: "PLAYING",
     players: states,
-    randomSeed: seed
+    randomSeed: seed,
+    revision: 0
   };
   const events: GameEvent[] = [{ type: "GAME_STARTED", gameId, firstPlayerId: state.currentPlayerId }];
   for (let count = 0; count < 3; count += 1) drawCard(state, states[firstIndex].playerId, events);
@@ -278,6 +279,7 @@ export function executeAction(currentState: GameState, action: PlayerAction): Ga
   else if (action.type === "END_TURN") endTurn(state, action, events);
   else if (action.type === "SURRENDER") surrender(state, action, events);
   else throw new GameRuleError(ErrorCode.INVALID_ACTION);
+  state.revision += 1;
   return { state, events };
 }
 
@@ -317,7 +319,9 @@ export function createPlayerView(state: GameState, viewerId: string): PlayerView
     currentPlayerId: state.currentPlayerId,
     turn: state.turn,
     status: state.status,
-    winnerId: state.winnerId
+    winnerId: state.winnerId,
+    stateRevision: state.revision,
+    opponentConnected: true
   };
 }
 

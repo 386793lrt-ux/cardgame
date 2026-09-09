@@ -13,8 +13,8 @@ const beta = new GameClient(serverUrl);
 function waitForConnection(client: GameClient): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("Connection timed out")), 5000);
-    const unsubscribe = client.onConnectionChange((connected) => {
-      if (!connected) return;
+    const unsubscribe = client.onConnectionChange((status) => {
+      if (status !== "CONNECTED") return;
       clearTimeout(timer);
       unsubscribe();
       resolve();
