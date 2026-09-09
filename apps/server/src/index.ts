@@ -1,8 +1,7 @@
 import { existsSync } from "node:fs";
 import { randomInt } from "node:crypto";
 import { createServer } from "node:http";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join, resolve } from "node:path";
 import cors, { type CorsOptions } from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { Server, type Socket } from "socket.io";
@@ -57,7 +56,7 @@ app.get("/health", (_request, response) => response.json({
   uptimeSeconds: Math.floor(process.uptime())
 }));
 
-const serverDirectory = dirname(fileURLToPath(import.meta.url));
+const serverDirectory = import.meta.dirname ?? process.cwd();
 const clientDist = resolve(serverDirectory, "../../../client/dist");
 if (existsSync(clientDist)) {
   app.use(express.static(clientDist));

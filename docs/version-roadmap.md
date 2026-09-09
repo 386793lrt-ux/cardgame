@@ -36,3 +36,12 @@ Pure TypeScript game-core, shared protocol, player-specific views, stable card I
 - Added a no-room-code human-vs-AI flow while preserving the existing friend room flow.
 - AI turns use the authoritative game core, normal GameEvent presentation, short action delays and a 30-action safety cap.
 - Added AI legality, secrecy, lethal choice, game-over, loop-safety and 100-game simulation tests.
+
+## 0.4.2 — portable Windows distribution
+
+- Added a self-contained Windows folder and ZIP build that requires no system Node.js or npm installation.
+- Bundles the compiled React client, single-file authoritative server, small static server and an official Node.js Windows runtime.
+- Includes the matching Node.js license and a Chinese quick-start guide.
+- The launcher automatically detects portable mode, starts only the bundled services on local ports 3001 and 5173, then opens the browser.
+- Closing the launcher stops only the two child processes it owns.
+- Source development mode remains available and unchanged for contributors.

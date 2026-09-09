@@ -1,6 +1,6 @@
-# 裂隙牌局（Riftbound Duel）0.4.1
+# 裂隙牌局（Riftbound Duel）0.4.2
 
-原创的 1v1 回合制卡牌游戏。0.4.1 在好友对战之外增加了规则型人机对战，并提供 Windows 一键启动器。服务端与 game-core 仍是唯一权威状态源，AI 也只能提交普通玩家操作，不能绕过规则修改结果。
+原创的 1v1 回合制卡牌游戏。0.4.2 提供无需安装 Node.js 的 Windows 便携发行包；好友对战、人机对战、权威服务器和 0.4 游戏表现保持不变。
 
 ## 目录
 
@@ -15,13 +15,23 @@
 
 ## 本地运行
 
-Windows 用户可直接双击：
+### Windows 便携版（推荐给普通玩家）
+
+运行 `npm run package:windows` 后，发行包位于：
+
+`release/CardGame-v0.4.2-Windows.zip`
+
+玩家只需完整解压 ZIP，然后双击其中的 `CardGame.exe`。便携包已经包含 Node.js 运行时、编译后的后端和静态前端，不需要安装 Node.js，不需要运行 npm，也不需要保留项目源码。
+
+### 源码开发启动器
+
+开发者在完整项目中可直接双击：
 
 `release/CardGame.exe`
 
 启动器会启动后端 `3001` 和前端 `5173`，等待两者就绪后打开默认浏览器。关闭启动器窗口时，它只会关闭本次由自己启动的游戏服务。如果服务已经在运行，则直接打开游戏，不重复启动。
 
-当前启动器体积较小，依赖项目目录、已经安装的 npm 依赖和 Node.js LTS；它不是把整个游戏封装进一个 EXE 的自包含安装包。
+这个位于源码根目录的启动器仍依赖项目目录、npm 依赖和 Node.js LTS；给普通玩家时应发送上面的 v0.4.2 便携 ZIP。
 
 开发方式仍可使用：
 
@@ -39,6 +49,12 @@ npm run dev
 
 ```bash
 npm run build:launcher
+```
+
+生成完整 Windows 便携包：
+
+```bash
+npm run package:windows
 ```
 
 公网环境通过 `VITE_GAME_SERVER_URL` 或同源部署连接，详见 `docs/deployment.md`。不要通过家庭路由器端口转发暴露开发电脑。

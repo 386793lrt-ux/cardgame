@@ -1,9 +1,9 @@
 import { existsSync } from "node:fs";
 import { loadEnvFile } from "node:process";
-import { dirname, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
+import { resolve } from "node:path";
 
-const rootEnvPath = resolve(dirname(fileURLToPath(import.meta.url)), "../../../.env");
+const moduleDirectory = import.meta.dirname ?? process.cwd();
+const rootEnvPath = resolve(moduleDirectory, "../../../.env");
 if (existsSync(rootEnvPath)) loadEnvFile(rootEnvPath);
 
 export interface ServerConfig {

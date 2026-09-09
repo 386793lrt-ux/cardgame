@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.IO;
@@ -17,8 +18,8 @@ namespace RiftboundLauncher
         private readonly Label statusLabel;
         private readonly Button openButton;
         private readonly string projectRoot;
-        private Process serverProcess;
-        private bool ownsServer;
+        private readonly string portableRoot;
+        private readonly List<Process> ownedProcesses = new List<Process>();
         private bool closing;
 
         public LauncherForm()
@@ -41,6 +42,7 @@ namespace RiftboundLauncher
             exitButton.Click += delegate { Close(); };
             Controls.Add(title); Controls.Add(statusLabel); Controls.Add(openButton); Controls.Add(exitButton);
 
+            portableRoot = FindPortableRoot();
             projectRoot = FindProjectRoot();
             Shown += async delegate { await StartGameAsync(); };
             FormClosing += OnLauncherClosing;
@@ -56,6 +58,17 @@ namespace RiftboundLauncher
             return null;
         }
 
+        private static string FindPortableRoot()
+        {
+            var root = AppDomain.CurrentDomain.BaseDirectory;
+            return File.Exists(Path.Combine(root, "runtime", "node.exe"))
+                && File.Exists(Path.Combine(root, "app", "server.mjs"))
+                && File.Exists(Path.Combine(root, "app", "static-server.mjs"))
+                && File.Exists(Path.Combine(root, "app", "client", "index.html"))
+                ? root
+                : null;
+        }
+
         private async Task StartGameAsync()
         {
             try
@@ -63,6 +76,11 @@ namespace RiftboundLauncher
                 if (await AreGameServicesHealthyAsync()) { Ready("游戏服务已经运行。", true); return; }
                 if (IsPortOccupied(3001)) throw new InvalidOperationException("后端端口 3001 已被其他程序占用，请先关闭占用该端口的程序。");
                 if (IsPortOccupied(5173)) throw new InvalidOperationException("前端端口 5173 已被其他程序占用，请先关闭占用该端口的程序。");
+                if (portableRoot != null)
+                {
+                    await StartPortableGameAsync();
+                    return;
+                }
                 if (projectRoot == null) throw new FileNotFoundException("找不到 CardGame 项目目录。请把 EXE 保留在项目的 release 文件夹中。");
                 if (!File.Exists(Path.Combine(projectRoot, "apps", "server", "package.json")) || !File.Exists(Path.Combine(projectRoot, "client", "package.json")))
                     throw new FileNotFoundException("缺少前端或后端项目文件，请确认游戏目录完整。");
@@ -72,23 +90,8 @@ namespace RiftboundLauncher
                 statusLabel.Text = "正在启动前端（5173）和后端（3001）……";
                 var startInfo = new ProcessStartInfo("cmd.exe", "/d /s /c \"npm run dev\"");
                 startInfo.WorkingDirectory = projectRoot;
-                startInfo.UseShellExecute = false;
-                startInfo.CreateNoWindow = true;
-                startInfo.RedirectStandardOutput = true;
-                startInfo.RedirectStandardError = true;
-                serverProcess = Process.Start(startInfo);
-                if (serverProcess == null) throw new InvalidOperationException("无法创建游戏服务进程。");
-                ownsServer = true;
-                serverProcess.BeginOutputReadLine();
-                serverProcess.BeginErrorReadLine();
-
-                for (var attempt = 0; attempt < 80; attempt += 1)
-                {
-                    if (serverProcess.HasExited) throw new InvalidOperationException("本地游戏服务启动失败，进程已提前退出。请确认已经安装项目依赖。");
-                    if (await AreGameServicesHealthyAsync()) { Ready("游戏已启动：前端 5173，后端 3001。关闭此窗口将同时关闭本地服务。", true); return; }
-                    await Task.Delay(250);
-                }
-                throw new TimeoutException("等待前端或后端启动超时。");
+                StartOwnedProcess(startInfo);
+                await WaitUntilReadyAsync("本地游戏服务启动失败，进程已提前退出。请确认已经安装项目依赖。");
             }
             catch (Exception error)
             {
@@ -97,6 +100,66 @@ namespace RiftboundLauncher
                 statusLabel.Text = "启动失败";
                 MessageBox.Show(this, error.Message, "裂隙牌局启动失败", MessageBoxButtons.OK, MessageBoxIcon.Error);
             }
+        }
+
+        private async Task StartPortableGameAsync()
+        {
+            statusLabel.Text = "正在启动便携版游戏……";
+            var runtime = Path.Combine(portableRoot, "runtime", "node.exe");
+
+            var backend = CreateHiddenProcess(runtime, "\"" + Path.Combine(portableRoot, "app", "server.mjs") + "\"", portableRoot);
+            backend.EnvironmentVariables["NODE_ENV"] = "development";
+            backend.EnvironmentVariables["HOST"] = "127.0.0.1";
+            backend.EnvironmentVariables["PORT"] = "3001";
+            backend.EnvironmentVariables["ALLOWED_ORIGINS"] = "http://localhost:5173,http://127.0.0.1:5173";
+            StartOwnedProcess(backend);
+
+            var frontend = CreateHiddenProcess(runtime, "\"" + Path.Combine(portableRoot, "app", "static-server.mjs") + "\"", portableRoot);
+            frontend.EnvironmentVariables["CLIENT_PORT"] = "5173";
+            frontend.EnvironmentVariables["CLIENT_HOST"] = "127.0.0.1";
+            StartOwnedProcess(frontend);
+
+            await WaitUntilReadyAsync("便携版游戏服务启动失败，请重新解压完整压缩包后再试。");
+        }
+
+        private static ProcessStartInfo CreateHiddenProcess(string fileName, string arguments, string workingDirectory)
+        {
+            return new ProcessStartInfo(fileName, arguments)
+            {
+                WorkingDirectory = workingDirectory,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true
+            };
+        }
+
+        private void StartOwnedProcess(ProcessStartInfo startInfo)
+        {
+            startInfo.UseShellExecute = false;
+            startInfo.CreateNoWindow = true;
+            startInfo.RedirectStandardOutput = true;
+            startInfo.RedirectStandardError = true;
+            var process = Process.Start(startInfo);
+            if (process == null) throw new InvalidOperationException("无法创建游戏服务进程。");
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+            ownedProcesses.Add(process);
+        }
+
+        private async Task WaitUntilReadyAsync(string exitedMessage)
+        {
+            for (var attempt = 0; attempt < 80; attempt += 1)
+            {
+                if (ownedProcesses.Exists(process => process.HasExited)) throw new InvalidOperationException(exitedMessage);
+                if (await AreGameServicesHealthyAsync())
+                {
+                    Ready("游戏已启动：前端 5173，后端 3001。关闭此窗口将同时关闭本地服务。", true);
+                    return;
+                }
+                await Task.Delay(250);
+            }
+            throw new TimeoutException("等待前端或后端启动超时。");
         }
 
         private static void WriteDiagnostic(string message)
@@ -174,17 +237,19 @@ namespace RiftboundLauncher
 
         private void StopOwnedServer()
         {
-            if (!ownsServer || serverProcess == null) return;
-            try
+            foreach (var process in ownedProcesses)
             {
-                if (!serverProcess.HasExited)
+                try
                 {
-                    var info = new ProcessStartInfo("taskkill.exe", "/PID " + serverProcess.Id + " /T /F") { UseShellExecute = false, CreateNoWindow = true };
-                    using (var killer = Process.Start(info)) { if (killer != null) killer.WaitForExit(5000); }
+                    if (!process.HasExited)
+                    {
+                        var info = new ProcessStartInfo("taskkill.exe", "/PID " + process.Id + " /T /F") { UseShellExecute = false, CreateNoWindow = true };
+                        using (var killer = Process.Start(info)) { if (killer != null) killer.WaitForExit(5000); }
+                    }
                 }
+                catch { }
             }
-            catch { }
-            ownsServer = false;
+            ownedProcesses.Clear();
         }
     }
 

@@ -12,3 +12,5 @@ apps/client-cocos/temp/
 apps/client-cocos/local/
 apps/client-cocos/build/
 apps/client-cocos/native/
+release/CardGame-v*-Windows/
+release/CardGame-v*-Windows.zip
