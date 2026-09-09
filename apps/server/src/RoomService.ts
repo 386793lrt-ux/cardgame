@@ -24,6 +24,7 @@ export interface RoomPlayer {
   socketId?: string;
   connected: boolean;
   disconnectedAt?: number;
+  isAi?: boolean;
 }
 
 export interface Room {
@@ -49,6 +50,11 @@ export interface SessionResult {
 
 export interface JoinResult extends SessionResult {
   initial: GameResult;
+}
+
+export interface AiGameResult extends SessionResult {
+  initial: GameResult;
+  aiPlayerId: string;
 }
 
 export interface ReconnectResult extends SessionResult {
@@ -128,6 +134,36 @@ export class RoomService {
     return { room, initial, session: this.sessionFor(room, player) };
   }
 
+  createAiGame(socketId: string, playerName: string, now = Date.now()): AiGameResult {
+    if (this.socketPlayers.has(socketId)) throw new RoomServiceError(ErrorCode.ALREADY_IN_ROOM);
+    const roomId = this.createRoomCode();
+    const human = this.createPlayer(socketId, playerName);
+    const ai: RoomPlayer = {
+      playerId: `AI_${randomUUID()}`,
+      name: "石桌守卫",
+      sessionToken: newSessionToken(),
+      connected: true,
+      isAi: true
+    };
+    const gameId = `GAME_AI_${roomId}_${now}`;
+    const initial = createGame(gameId, roomId, [
+      { playerId: human.playerId, name: human.name },
+      { playerId: ai.playerId, name: ai.name }
+    ], randomInt(1, 0x7fffffff));
+    const room: Room = {
+      roomId,
+      status: "PLAYING",
+      players: [human, ai],
+      game: initial.state,
+      createdAt: now,
+      lastActivityAt: now
+    };
+    this.rooms.set(roomId, room);
+    this.bindSocket(socketId, roomId, human.playerId);
+    this.logger.info("ai_game_started", { roomId, gameId, playerId: human.playerId, aiPlayerId: ai.playerId });
+    return { room, initial, session: this.sessionFor(room, human), aiPlayerId: ai.playerId };
+  }
+
   reconnect(roomId: string, playerId: string, sessionToken: string, socketId: string, now = Date.now()): ReconnectResult {
     const room = this.rooms.get(roomId);
     if (!room) throw new RoomServiceError(ErrorCode.ROOM_NOT_FOUND);
@@ -156,7 +192,20 @@ export class RoomService {
     if (!room) throw new RoomServiceError(ErrorCode.NOT_IN_ROOM);
     if (!room.game) throw new RoomServiceError(ErrorCode.GAME_NOT_STARTED);
 
-    const processed = this.processedActions.get(identity.playerId);
+    return this.applyRoomAction(room, action, now);
+  }
+
+  applyAiAction(roomId: string, action: PlayerAction, now = Date.now()): ActionResult {
+    const room = this.rooms.get(roomId);
+    if (!room || !room.game) throw new RoomServiceError(ErrorCode.GAME_NOT_STARTED);
+    const player = room.players.find((candidate) => candidate.playerId === action.playerId);
+    if (!player?.isAi) throw new RoomServiceError(ErrorCode.PLAYER_ID_MISMATCH);
+    return this.applyRoomAction(room, action, now);
+  }
+
+  private applyRoomAction(room: Room, action: PlayerAction, now: number): ActionResult {
+    if (!room.game) throw new RoomServiceError(ErrorCode.GAME_NOT_STARTED);
+    const processed = this.processedActions.get(action.playerId);
     const previousRevision = processed?.get(action.actionId);
     if (previousRevision !== undefined) {
       return { room, result: { state: room.game, events: [] }, duplicate: true };
@@ -166,7 +215,7 @@ export class RoomService {
     room.game = result.state;
     room.status = result.state.status;
     room.lastActivityAt = now;
-    this.rememberAction(identity.playerId, action.actionId, result.state.revision);
+    this.rememberAction(action.playerId, action.actionId, result.state.revision);
     if (result.state.status === "FINISHED") {
       room.finishedAt = now;
       this.logger.info("game_finished", { roomId: room.roomId, gameId: result.state.gameId, winnerId: result.state.winnerId });

@@ -31,6 +31,7 @@ export interface ReconnectResult {
 
 export interface ClientToServerEvents {
   CREATE_ROOM: (payload: { playerName: string }, ack: (result: RoomActionResult) => void) => void;
+  CREATE_AI_GAME: (payload: { playerName: string }, ack: (result: RoomActionResult) => void) => void;
   JOIN_ROOM: (payload: { roomId: string; playerName: string }, ack: (result: RoomActionResult) => void) => void;
   RECONNECT_GAME: (payload: PlayerSession, ack: (result: ReconnectResult) => void) => void;
   PLAYER_ACTION: (action: PlayerAction, ack: (result: PlayerActionResult) => void) => void;

@@ -11,7 +11,7 @@ import { errorMessage } from "./errorMessages";
 import { gameClient } from "./gameClient";
 import { emptySelection, isCardPlayable, isLegalTarget, isYourTurn, presentationFromEvents, targetModeForCard, type PendingAction, type PresentationState, type SelectionState } from "./uiModel";
 
-type LobbyMode = "HOME" | "JOIN";
+type LobbyMode = "HOME" | "FRIEND" | "JOIN";
 const emptyPresentation: PresentationState = { nonce: 0, floatingNumbers: [], summonedIds: [], dyingMinions: [], impactedIds: [] };
 
 function connectionText(status: ConnectionStatus): string {
@@ -29,6 +29,7 @@ function Lobby({ connectionStatus, room, error }: { connectionStatus: Connection
   const [busy, setBusy] = useState(false);
   const connected = connectionStatus === "CONNECTED";
   const create = async () => { if (busy) return; setBusy(true); await gameClient.createRoom(name); setBusy(false); };
+  const createAi = async () => { if (busy) return; setBusy(true); await gameClient.createAiGame(name); setBusy(false); };
   const join = async () => { if (busy) return; setBusy(true); await gameClient.joinRoom(code, name); setBusy(false); };
 
   if (room) return (
@@ -46,7 +47,9 @@ function Lobby({ connectionStatus, room, error }: { connectionStatus: Connection
       <div className="brand-mark">✦</div><p className="eyebrow">双人回合制卡牌对决</p><h1>裂隙牌局</h1>
       <p className="lobby-intro">在古老石桌两端召唤异界生灵，以法术改写胜负。</p>
       <label className="field-label" htmlFor="player-name">旅者称号</label><input id="player-name" maxLength={16} value={name} onChange={(event) => setName(event.target.value)} placeholder="无名旅者" />
-      {mode === "HOME" ? <div className="lobby-actions"><button className="primary-action" onClick={() => void create()} disabled={!connected || busy}>创建房间</button><button className="secondary-action" onClick={() => setMode("JOIN")} disabled={!connected}>加入房间</button></div> : <div className="join-form"><label className="field-label" htmlFor="room-code">六位房间码</label><input id="room-code" inputMode="numeric" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))} placeholder="482913" /><div className="lobby-actions"><button className="primary-action" onClick={() => void join()} disabled={!connected || busy || code.length !== 6}>进入牌局</button><button className="secondary-action" onClick={() => setMode("HOME")}>返回</button></div></div>}
+      {mode === "HOME" && <div className="lobby-actions mode-actions"><button className="primary-action" onClick={() => void createAi()} disabled={!connected || busy}>人机对战</button><button className="secondary-action" onClick={() => setMode("FRIEND")} disabled={!connected}>好友对战</button></div>}
+      {mode === "FRIEND" && <div className="friend-menu"><p className="mode-note">创建六位房间码，或加入朋友已经创建的牌局。</p><div className="lobby-actions"><button className="primary-action" onClick={() => void create()} disabled={!connected || busy}>创建房间</button><button className="secondary-action" onClick={() => setMode("JOIN")} disabled={!connected}>输入房间码</button></div><button className="text-action" onClick={() => setMode("HOME")}>返回主菜单</button></div>}
+      {mode === "JOIN" && <div className="join-form"><label className="field-label" htmlFor="room-code">六位房间码</label><input id="room-code" inputMode="numeric" maxLength={6} value={code} onChange={(event) => setCode(event.target.value.replace(/\D/g, ""))} placeholder="482913" /><div className="lobby-actions"><button className="primary-action" onClick={() => void join()} disabled={!connected || busy || code.length !== 6}>进入牌局</button><button className="secondary-action" onClick={() => setMode("FRIEND")}>返回</button></div></div>}
       <p className={`connection ${connected ? "online" : "offline"}`}><i />{connectionText(connectionStatus)}</p>{error && <p className="lobby-error" role="alert">{error}</p>}
     </section></main>
   );

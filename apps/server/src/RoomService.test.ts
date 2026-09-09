@@ -77,6 +77,23 @@ test("9: reconnect views still exclude the opponent hand", () => {
   assert.equal("hand" in view.opponent, false);
 });
 
+test("AI room starts immediately and AI actions use the normal rule engine", () => {
+  const rooms = service();
+  const created = rooms.createAiGame("SOCKET_HUMAN", "旅者", 300);
+  assert.equal(created.room.status, "PLAYING");
+  assert.equal(created.room.players.length, 2);
+  assert.equal(created.room.players.find((player) => player.playerId === created.aiPlayerId)?.isAi, true);
+  assert.equal("hand" in createPlayerView(created.room.game!, created.session.playerId).opponent, false);
+
+  const aiTurn = created.room.game!.currentPlayerId === created.aiPlayerId;
+  if (aiTurn) {
+    const result = rooms.applyAiAction(created.room.roomId, endTurn(created.aiPlayerId, "AI_ACTION_0001"), 301);
+    assert.equal(result.result.state.revision, 1);
+  } else {
+    expectCode(() => rooms.applyAiAction(created.room.roomId, endTurn(created.session.playerId, "HUMAN_FAKE_AI"), 301), ErrorCode.PLAYER_ID_MISMATCH);
+  }
+});
+
 test("10: a duplicate actionId is idempotent", () => {
   const { rooms, room, first, second } = startedRoom();
   const current = room.game!.currentPlayerId;

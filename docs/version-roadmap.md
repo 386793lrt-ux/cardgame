@@ -27,3 +27,12 @@ Pure TypeScript game-core, shared protocol, player-specific views, stable card I
 - Added short CSS transform/opacity animations, floating combat numbers, friendly errors, match intro and result overlay.
 - Added an audio manager interface without bundling third-party audio assets.
 - Kept authoritative rules, opponent hand secrecy, reconnect and the existing v0.3 server behavior unchanged.
+
+## 0.4.1 — local launcher and AI opponent
+
+- Added a lightweight Windows launcher at `release/CardGame.exe` that starts the backend on port 3001 and the Vite client on port 5173, waits for both, and opens the browser.
+- The launcher avoids duplicate services and only stops the process tree that it started itself.
+- Added a rule-based `game-ai` package that sees only `PlayerViewState` and produces ordinary `PlayerAction` values.
+- Added a no-room-code human-vs-AI flow while preserving the existing friend room flow.
+- AI turns use the authoritative game core, normal GameEvent presentation, short action delays and a 30-action safety cap.
+- Added AI legality, secrecy, lethal choice, game-over, loop-safety and 100-game simulation tests.

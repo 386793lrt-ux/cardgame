@@ -91,6 +91,14 @@ export class GameClient {
     return result;
   }
 
+  async createAiGame(playerName: string): Promise<RoomActionResult> {
+    const result = await new Promise<RoomActionResult>((resolve) => {
+      this.socket.emit("CREATE_AI_GAME", { playerName }, resolve);
+    });
+    this.acceptSession(result);
+    return result;
+  }
+
   async joinRoom(roomId: string, playerName: string): Promise<RoomActionResult> {
     const result = await new Promise<RoomActionResult>((resolve) => {
       this.socket.emit("JOIN_ROOM", { roomId, playerName }, resolve);

@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { randomInt } from "node:crypto";
 import { createServer } from "node:http";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,6 +7,7 @@ import cors, { type CorsOptions } from "cors";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { Server, type Socket } from "socket.io";
 import { createPlayerEvents, createPlayerView } from "@riftbound/game-core";
+import { RuleBasedGameAI } from "@riftbound/game-ai";
 import {
   ErrorCode,
   GAME_PROTOCOL_VERSION,
@@ -30,6 +32,10 @@ type GameSocket = Socket<ClientToServerEvents, ServerToClientEvents>;
 const logger = new Logger(serverConfig.logLevel);
 const roomService = new RoomService(logger, serverConfig);
 const limiter = new SlidingWindowRateLimiter(serverConfig.rateLimitWindowMs);
+const gameAi = new RuleBasedGameAI();
+const aiTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const aiTurnActions = new Map<string, { turn: number; count: number; sequence: number }>();
+const MAX_AI_ACTIONS_PER_TURN = 30;
 
 const originAllowed = (origin: string | undefined): boolean => !origin || serverConfig.allowedOrigins.includes(origin);
 const corsOptions: CorsOptions = {
@@ -99,6 +105,48 @@ function emitGameUpdate(room: Room, events: readonly GameEvent[]): void {
   }
 }
 
+function cancelAiTurn(roomId: string): void {
+  const timer = aiTimers.get(roomId);
+  if (timer) clearTimeout(timer);
+  aiTimers.delete(roomId);
+  aiTurnActions.delete(roomId);
+}
+
+function scheduleAiTurn(room: Room): void {
+  if (aiTimers.has(room.roomId) || !room.game || room.status !== "PLAYING") return;
+  const aiPlayer = room.players.find((player) => player.isAi && player.playerId === room.game?.currentPlayerId);
+  if (!aiPlayer) return;
+  const timer = setTimeout(() => {
+    aiTimers.delete(room.roomId);
+    const currentRoom = roomService.getRoom(room.roomId);
+    if (!currentRoom?.game || currentRoom.status !== "PLAYING") return cancelAiTurn(room.roomId);
+    const currentAi = currentRoom.players.find((player) => player.isAi && player.playerId === currentRoom.game?.currentPlayerId);
+    if (!currentAi) return;
+
+    const previous = aiTurnActions.get(room.roomId);
+    const counter = previous?.turn === currentRoom.game.turn ? previous : { turn: currentRoom.game.turn, count: 0, sequence: previous?.sequence ?? 0 };
+    counter.count += 1;
+    counter.sequence += 1;
+    aiTurnActions.set(room.roomId, counter);
+    const meta = { playerId: currentAi.playerId, actionId: `AI_ACTION_${currentRoom.game.gameId}_${counter.sequence}`, clientSequence: counter.sequence };
+    const action = counter.count >= MAX_AI_ACTIONS_PER_TURN
+      ? { ...meta, type: "END_TURN" as const }
+      : gameAi.chooseAction({ view: createPlayerView(currentRoom.game, currentAi.playerId), actionId: meta.actionId, clientSequence: meta.clientSequence });
+    if (!action) return;
+    try {
+      const result = roomService.applyAiAction(room.roomId, action);
+      emitGameUpdate(result.room, result.result.events);
+      if (result.room.status === "FINISHED") cancelAiTurn(result.room.roomId);
+      else scheduleAiTurn(result.room);
+    } catch (error) {
+      logger.warn("ai_action_failed", { roomId: room.roomId, playerId: currentAi.playerId, errorCode: errorCodeOf(error) });
+      cancelAiTurn(room.roomId);
+    }
+  }, randomInt(400, 1_001));
+  timer.unref();
+  aiTimers.set(room.roomId, timer);
+}
+
 function fail(socket: GameSocket, error: unknown, playerId?: string): ErrorCode {
   const code = errorCodeOf(error);
   logger.warn("invalid_action", { socketId: socket.id, playerId, errorCode: code });
@@ -124,6 +172,23 @@ io.on("connection", (socket) => {
       const result: RoomActionResult = { ok: true, roomId: room.roomId, playerId: session.playerId, session };
       ack(result);
       emitRoomState(room);
+    } catch (error) {
+      ack({ ok: false, errorCode: fail(socket, error) });
+    }
+  });
+
+  socket.on("CREATE_AI_GAME", (rawPayload, ack) => {
+    try {
+      if (!limiter.allow(`${socket.id}:create`, serverConfig.createRoomRateLimit)) throw rateLimited();
+      const parsed = createRoomPayloadSchema.safeParse(rawPayload);
+      if (!parsed.success) throw invalidPayload();
+      const { room, session, initial } = roomService.createAiGame(socket.id, parsed.data.playerName);
+      socket.join(room.roomId);
+      socket.join(session.playerId);
+      ack({ ok: true, roomId: room.roomId, playerId: session.playerId, session });
+      emitRoomState(room);
+      emitGameUpdate(room, initial.events);
+      scheduleAiTurn(room);
     } catch (error) {
       ack({ ok: false, errorCode: fail(socket, error) });
     }
@@ -162,6 +227,7 @@ io.on("connection", (socket) => {
       ack({ ok: true, roomId: room.roomId, playerId: session.playerId, stateRevision: room.game?.revision });
       emitRoomState(room);
       emitGameUpdate(room, [{ type: "PLAYER_RECONNECTED", playerId: session.playerId }]);
+      scheduleAiTurn(room);
       for (const opponent of room.players.filter((player) => player.playerId !== session.playerId && player.socketId)) {
         io.to(opponent.socketId!).emit("OPPONENT_CONNECTION", { connected: true });
       }
@@ -180,6 +246,7 @@ io.on("connection", (socket) => {
       actionId = action.actionId;
       const { room, result, duplicate } = roomService.applyPlayerAction(socket.id, action);
       if (!duplicate) emitGameUpdate(room, result.events);
+      if (!duplicate) scheduleAiTurn(room);
       ack({ ok: true, actionId, duplicate, stateRevision: result.state.revision });
     } catch (error) {
       ack({ ok: false, actionId, errorCode: fail(socket, error, roomService.roomForSocket(socket.id)?.players.find((p) => p.socketId === socket.id)?.playerId) });
@@ -215,6 +282,7 @@ const maintenanceTimer = setInterval(() => {
       emitRoomState(event.room);
       emitGameUpdate(event.room, event.result.events);
     } else {
+      cancelAiTurn(event.roomId);
       for (const socketId of event.socketIds) io.sockets.sockets.get(socketId)?.leave(event.roomId);
     }
   }
@@ -231,6 +299,7 @@ function shutdown(signal: string): void {
   shuttingDown = true;
   logger.info("server_shutdown", { signal });
   clearInterval(maintenanceTimer);
+  for (const roomId of [...aiTimers.keys()]) cancelAiTurn(roomId);
   roomService.close();
   io.close(() => {
     httpServer.close(() => process.exit(0));
